@@ -1,0 +1,360 @@
+{
+  "name": "AI Invoice Processing",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Upload Invoice",
+        "formDescription": "Upload a PDF invoice. The system will read it, check the details, save it, and send it to a manager for approval.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Invoice",
+              "fieldType": "file",
+              "acceptFileTypes": "pdf",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        128,
+        -224
+      ],
+      "id": "fc99d8d4-7bfd-42be-8920-bf30fc6b40b1",
+      "name": "On form submission",
+      "webhookId": "a6e8a376-e0ba-460c-9815-4d6e2c696404"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "Invoice",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        352,
+        -224
+      ],
+      "id": "f5225e8f-760c-4fa0-b596-a01dd43a40f2",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "   https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "=   {{ JSON.stringify({\n        model: 'openai/gpt-oss-120b',\n     response_format: { type: 'json_object' },\n     messages: [\n       { role: 'system', content: 'You extract invoice data. Return ONLY a JSON object with keys: vendor (string), invoice_number (string), invoice_date (YYYY-MM-DD), currency (3-letter code), total (number), line_items (array of objects with description, quantity, amount). Use null for any value that is missing.' },\n       { role: 'user', content: $json.text }\n     ]\n   }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        576,
+        -224
+      ],
+      "id": "fefb6280-1dc8-4a33-a785-e2dfb794e26b",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "JN2eOEJCDnDFQJVM",
+          "name": "Bearer Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.choices[0].message.content;\n\nlet d;\ntry {\n  d = JSON.parse(raw.replace(/```json|```/g, '').trim());\n} catch (e) {\n  d = {};\n}\n\nconst issues = [];\n\n['vendor', 'invoice_number', 'invoice_date', 'total'].forEach(k => {\n  if (d[k] === undefined || d[k] === null || d[k] === '') issues.push('Missing ' + k);\n});\n\nif (d.total !== undefined && d.total !== null && !(Number(d.total) > 0)) {\n  issues.push('Total must be greater than 0');\n}\n\nif (d.invoice_date && !/^\\d{4}-\\d{2}-\\d{2}$/.test(d.invoice_date)) {\n  issues.push('Invalid date format');\n}\n\nconst items = Array.isArray(d.line_items) ? d.line_items : [];\n\nreturn [{\n  json: {\n    vendor: d.vendor,\n    invoice_number: d.invoice_number,\n    invoice_date: d.invoice_date,\n    currency: d.currency || 'USD',\n    total: Number(d.total),\n    line_items: JSON.stringify(items),\n    valid: issues.length === 0,\n    issues: issues.join('; ')\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        -224
+      ],
+      "id": "ba691aa3-1847-4cfc-a064-a8fd08e47912",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "1c35b69b-ebcc-4fff-b068-243db8afeb83",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1024,
+        -224
+      ],
+      "id": "63ba9673-308c-4f35-9452-1a1e283f17b5",
+      "name": "Is Valid?"
+    },
+    {
+      "parameters": {
+        "tableId": "invoices",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "vendor",
+              "fieldValue": "=\t{{ $json.vendor }}"
+            },
+            {
+              "fieldId": "invoice_number",
+              "fieldValue": "={{ $json.invoice_number }}"
+            },
+            {
+              "fieldId": "invoice_date",
+              "fieldValue": "={{ $json.invoice_date }}"
+            },
+            {
+              "fieldId": "currency",
+              "fieldValue": "={{ $json.currency }}"
+            },
+            {
+              "fieldId": "total",
+              "fieldValue": "=\t{{ $json.total }}"
+            },
+            {
+              "fieldId": "line_items",
+              "fieldValue": "=\t{{ $json.line_items }}"
+            },
+            {
+              "fieldId": "status",
+              "fieldValue": "pending"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1248,
+        -224
+      ],
+      "id": "3f915bbb-c812-4885-81e8-ed604c4df106",
+      "name": "Save to Supabase",
+      "credentials": {
+        "supabaseApi": {
+          "id": "eFQ8c2zHkNCC220h",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "sendTo": "YOUR_EMAIL@example.com",
+        "subject": "=     Approve invoice {{ $json.invoice_number }} from {{ $json.vendor }}",
+        "message": "=     Vendor: {{ $json.vendor }}\n     Invoice #: {{ $json.invoice_number }}\n     Date: {{ $json.invoice_date }}\n     Total: {{ $json.total }} {{ $json.currency }}\n\n     Please approve or disapprove this invoice.",
+        "approvalOptions": {
+          "values": {
+            "approvalType": "double"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1472,
+        -224
+      ],
+      "id": "294e83ad-d385-4aeb-bb8a-125a4cabeb2f",
+      "name": "Request Approval",
+      "webhookId": "52fa2943-9f13-487d-bc29-fff78433cf2e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Gzy4yQOZApIyQMU9",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "invoices",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "=     {{ $('Save to Supabase').first().json.id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "=     {{ $json.data.approved ? 'approved' : 'rejected' }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1696,
+        -224
+      ],
+      "id": "b1433c6e-2d5c-49c7-b599-50dfbb430273",
+      "name": "Update Status",
+      "credentials": {
+        "supabaseApi": {
+          "id": "eFQ8c2zHkNCC220h",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL@example.com",
+        "subject": "=     Invoice needs manual review: {{ $json.invoice_number || 'unknown' }}",
+        "emailType": "text",
+        "message": "=     The AI could not validate this invoice.\n\n     Problems found: {{ $json.issues }}\n\n     Vendor: {{ $json.vendor }}\n     Total: {{ $json.total }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1296,
+        -80
+      ],
+      "id": "e33a2767-ee02-4e32-a696-08be7c8b7bbf",
+      "name": "Flag for Manual Review",
+      "webhookId": "f8ab42e7-e6a0-4f7f-8397-05054fa5d671",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Gzy4yQOZApIyQMU9",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Is Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Valid?": {
+      "main": [
+        [
+          {
+            "node": "Save to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Flag for Manual Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Request Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request Approval": {
+      "main": [
+        [
+          {
+            "node": "Update Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "9b0084dd-4881-4fb7-bb8d-6d4149f83567",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c1385714ae2765118006860ece67a034f7ea450f34d621826b92098c054d20dd"
+  },
+  "nodeGroups": [],
+  "id": "g9W0ZA464lNAXs9I",
+  "tags": []
+}
