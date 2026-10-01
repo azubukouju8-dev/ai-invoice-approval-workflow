@@ -4,6 +4,15 @@ An n8n workflow that reads PDF invoices with AI, validates the data,
 stores it in Supabase, and sends it to a manager for approval by email.
 
 ## How it works
+## Screenshots
+
+Workflow:
+
+![Workflow](workflow.png)
+
+Database after an approval:
+
+![Database](database.png)
 1. A PDF invoice is uploaded through an n8n form
 2. Text is extracted from the PDF
 3. An LLM (via REST API) returns structured JSON: vendor, invoice number,
